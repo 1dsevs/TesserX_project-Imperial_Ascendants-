@@ -1,0 +1,144 @@
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+
+#define R_LED 10
+#define G_LED 2
+
+// I2C LCD Configuration (0x27 or 0x3F)
+LiquidCrystal_I2C lcd(0x3F, 16, 2);
+
+// Hardware Pins
+const int SERVO_PIN = 9;     // Valve control
+const int BUZZER_PIN = 12;    // Alert buzzer
+
+// Servo Positions
+const int VALVE_CLOSED = 0;   // 0° = Closed
+const int VALVE_OPEN = 90;    // 90° = Open
+
+// Thresholds
+const int FLOOD_LEVEL = 7;
+
+int water_level_proc[10] ;
+
+int water_level ;
+int subject;
+int data;
+int tmpobj;
+
+bool trigger1 ; 
+bool flood_status;
+
+Servo valveServo;
+unsigned long lastDataTime = 0;
+const unsigned long DATA_TIMEOUT = 5000; // 5 seconds without data
+
+void typeText(const String &text, int col, int row, int delayTime = 10) {
+  lcd.setCursor(col, row);
+  for (int i = 0; i < text.length(); i++) {
+    lcd.print(text[i]);
+    delay(delayTime);
+  }
+}
+
+void displayStatusFrame() {
+  lcd.clear();
+  typeText("Water Level: ", 0, 0);
+  typeText("Flood Status: ", 0, 1);
+}
+
+void updateDisplay(int water_level, const String &status, const String &color) {
+  // Clear only the value areas (positions 13-15)
+  lcd.setCursor(13, 0);
+  lcd.print("   ");
+  lcd.setCursor(13, 1);
+  lcd.print("   ");
+  
+  // Display water level with typing effect
+  lcd.setCursor(13, 0);
+  if (water_level >= 0) {
+    String levelText = String(water_level);
+    typeText(levelText, 13, 0, 50);
+    //delay(250);
+  }
+  // Display status with typing effect
+  lcd.setCursor(13, 1);
+  typeText(status, 13, 1, 50);
+
+  // Display color indicator (using symbols since most LCDs are monochrome)
+  lcd.setCursor(15, 1);
+  if (color == "RED") {
+    lcd.print("!");  // Red indicator
+  }
+  else {
+    lcd.print(":)");  // Green (happy)
+  }
+}
+
+void setup() {
+  Serial.begin(9600);
+  lcd.init();
+  lcd.backlight();
+  
+  valveServo.attach(SERVO_PIN);
+  valveServo.write(VALVE_CLOSED);
+  
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(A0 , INPUT);
+  pinMode(A1 , INPUT);
+  
+  // Initial message with typing effect
+  typeText("aquaGardian v1.0", 0, 0);
+  typeText("initializing...", 0, 1);
+  delay(500);
+  
+  // Show the status frame
+  displayStatusFrame();
+
+  if (trigger1){//take the WL input every 10ms and store the past 100ms at the startup
+    for (int i = 0 ; i > 10 ; i++){  
+      water_level_proc[i] = analogRead(A0)/24;
+      delay(10);
+      trigger1 = 1;
+    }
+  }
+  
+}
+
+void loop() {
+
+  Serial.println(water_level);
+
+    for (int i = 0 ; i > 9 ; i++){		//shift the array by one
+    	water_level_proc[i] = water_level_proc[ i+1 ];
+    }
+    
+    water_level_proc[9] = analogRead(A0); //sets the last var of the array to the WL input and waits 10ms to maintain the 100ms buffer
+    delay(10);
+    
+
+    for (int i = 1 ; i > 10 ; i++){
+    	tmpobj = (( water_level_proc[ i-1 ] * i ) + water_level_proc[i] ) /( i + 1 );	//get the average of the water level over the past 100ms
+    }
+
+    water_level = tmpobj ;	//set the water level to the average
+
+    if (water_level >= FLOOD_LEVEL) {
+      updateDisplay(water_level, "R ", "RED");
+      valveServo.write(VALVE_OPEN);
+      tone(BUZZER_PIN, 1000);
+      flood_status = 1;
+      tone(R_LED , 100);
+      noTone(G_LED);
+    } 
+    else {
+      updateDisplay(water_level, "G", "GREEN");
+      valveServo.write(VALVE_CLOSED);
+      noTone(BUZZER_PIN);
+      flood_status = 0;
+      noTone(R_LED);
+      tone(G_LED, 100);
+      }
+  
+
+  //delay(250);
+}
